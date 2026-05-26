@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ============================================================
 # Swordfish DMG Builder
-# Fetches the latest release tag, builds, and creates a DMG
+# Builds from current HEAD, names DMG from latest upstream tag
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,45 +13,47 @@ RELEASE_BUILD_DIR="$SCRIPT_DIR/release-build"
 STAGING="/tmp/swordfish-dmg-staging"
 ICON_PNG="$SCRIPT_DIR/images/icon.png"
 ICON_ICNS="$SCRIPT_DIR/images/icon.icns"
+UPSTREAM_URL="https://github.com/maxprograms-com/Swordfish.git"
 
 echo "=== Swordfish DMG Build ==="
 
-# --- Step 0: Ensure we're on master before fetching ---
-CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "detached")
-if [ "$CURRENT_BRANCH" != "master" ]; then
-    echo "Switching to master branch..."
-    git checkout master
+# --- Step 1: Ensure upstream remote exists ---
+if ! git remote get-url upstream &>/dev/null; then
+    echo "[1/8] Adding upstream remote..."
+    git remote add upstream "$UPSTREAM_URL"
+else
+    echo "[1/8] Upstream remote already configured"
 fi
 
-# --- Step 1: Fetch latest tags ---
-echo "[1/7] Fetching latest tags..."
-git fetch --tags
+# --- Step 2: Fetch latest tags from both remotes ---
+echo "[2/8] Fetching tags from origin and upstream..."
+git fetch origin --tags --quiet
+git fetch upstream --tags --quiet
 
-# --- Step 2: Get latest tag (fall back to HEAD if no tags) ---
+# --- Step 3: Determine version string ---
 LATEST_TAG=$(git tag --sort=-creatordate | head -1)
 if [ -z "$LATEST_TAG" ]; then
-    echo "[2/7] No tags found, using current master HEAD"
-    git checkout master
-    git pull origin master
+    # No tags at all — fall back to package.json version
+    VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
+    echo "[3/8] No tags found, using package.json version: $VERSION"
 else
-    echo "[2/7] Latest release: $LATEST_TAG"
-
-    # --- Step 3: Checkout the tag ---
-    echo "[3/7] Checking out $LATEST_TAG..."
-    git stash --quiet 2>/dev/null || true
-    git checkout "$LATEST_TAG"
+    VERSION="${LATEST_TAG#v}"
+    echo "[3/8] Latest tag: $LATEST_TAG (version: $VERSION)"
 fi
 
-# --- Step 4: Build Java backend ---
-echo "[4/7] Building Java runtime image..."
+# --- Step 4: Ensure we're building from current HEAD ---
+echo "[4/8] Building from $(git rev-parse --short HEAD) on branch $(git branch --show-current)"
+
+# --- Step 5: Build Java backend ---
+echo "[5/8] Building Java runtime image..."
 gradle
 
-# --- Step 5: Install npm deps and build TypeScript ---
-echo "[5/7] Installing npm dependencies and building TypeScript..."
+# --- Step 6: Install npm deps and build TypeScript ---
+echo "[6/8] Installing npm dependencies and building TypeScript..."
 npm install
 npm run build
 
-# --- Step 6: Generate ICNS if needed ---
+# --- Step 7: Generate ICNS if needed ---
 if [ ! -f "$ICON_ICNS" ]; then
     echo "[*] Generating ICNS icon..."
     ICONSET="/tmp/swordfish-icon.iconset"
@@ -71,9 +73,8 @@ if [ ! -f "$ICON_ICNS" ]; then
     rm -rf "$ICONSET"
 fi
 
-# --- Step 7: Package with Electron and create DMG ---
-VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
-echo "[6/7] Packaging Electron app for darwin arm64..."
+# --- Step 8: Package with Electron and create DMG ---
+echo "[8/8] Packaging Electron app for darwin arm64..."
 npx electron-packager . Swordfish \
     --platform=darwin \
     --arch=arm64 \
@@ -85,7 +86,7 @@ DMG_NAME="Swordfish-${VERSION}-arm64.dmg"
 DMG_PATH="$RELEASE_BUILD_DIR/$DMG_NAME"
 APP_PATH="$RELEASE_BUILD_DIR/Swordfish-darwin-arm64/Swordfish.app"
 
-echo "[7/7] Creating DMG..."
+echo "[8/8] Creating DMG..."
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
 cp -R "$APP_PATH" "$STAGING/"
