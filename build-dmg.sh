@@ -9,6 +9,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Ensure JDK 26 is used (required for Java 25+ class files in upstream jars)
+if [ -d "/opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home" ]; then
+    export JAVA_HOME="/opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home"
+    export PATH="$JAVA_HOME/bin:$PATH"
+fi
+
 RELEASE_BUILD_DIR="$SCRIPT_DIR/release-build"
 STAGING="/tmp/swordfish-dmg-staging"
 ICON_PNG="$SCRIPT_DIR/images/icon.png"
