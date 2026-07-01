@@ -81,7 +81,7 @@ fi
 
 # --- Step 8: Package with Electron and create DMG ---
 echo "[8/8] Packaging Electron app for darwin arm64..."
-npx electron-packager . Swordfish \
+npx --yes @electron/packager . Swordfish \
     --platform=darwin \
     --arch=arm64 \
     --overwrite \
