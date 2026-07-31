@@ -2508,12 +2508,17 @@ export class TranslationView {
         this.sourceTags = this.getTags(source);
 
         this.currentCell = this.currentRow.getElementsByClassName('target')[0] as HTMLTableCellElement;
-        this.currentCell.addEventListener('keyup', () => this.changeListener());
+        this.currentCell.addEventListener('keyup', (event: KeyboardEvent) => {
+            this.changeListener();
+            this.handlePredictionInput(event);
+        });
 
         let currentTranslate: HTMLTableCellElement = this.currentRow.getElementsByClassName('translate')[0] as HTMLTableCellElement;
         // Apply highlightSpaces to ensure consistent comparison when leaving the segment
         this.currentCell.innerHTML = this.highlightSpaces(this.currentCell.innerHTML);
         this.currentContent = this.currentCell.innerHTML;
+        this.predictionEngine.clear();
+        this.clearGhost();
         if (!currentTranslate.innerHTML.includes(TranslationView.LOCK_FRAGMENT)) {
             this.currentCell.contentEditable = 'true';
             this.currentCell.classList.add('editing');
@@ -2542,6 +2547,31 @@ export class TranslationView {
         }
         this.centerRow(this.currentRow);
         this.currentCell.focus();
+        this.currentCell.addEventListener('keydown', (event: KeyboardEvent) => {
+            if (event.key === 'Tab') {
+                const ghost: HTMLSpanElement | null = this.currentCell?.querySelector('.ghost-prediction') as HTMLSpanElement | null;
+                if (ghost) {
+                    event.preventDefault();
+                    ghost.remove();
+                    // Insert the completion text at cursor
+                    const sel: Selection | null = window.getSelection();
+                    if (sel && sel.rangeCount) {
+                        const r: Range = sel.getRangeAt(0);
+                        r.insertNode(document.createTextNode(ghost.textContent || ''));
+                        r.collapse(false);
+                        sel.removeAllRanges();
+                        sel.addRange(r);
+                    }
+                }
+            }
+            if (event.key === 'Escape') {
+                const ghost: HTMLSpanElement | null = this.currentCell?.querySelector('.ghost-prediction') as HTMLSpanElement | null;
+                if (ghost) {
+                    event.preventDefault();
+                    ghost.remove();
+                }
+            }
+        });
     }
 
     editSource(): void {
@@ -2762,6 +2792,7 @@ export class TranslationView {
                 this.mtMatches?.add(match);
             }
         }
+        this.updatePredictionIndex();
         if (max > 0 && this.currentRow) {
             (this.currentRow.getElementsByClassName('match')[0] as HTMLTableCellElement).innerHTML = max + '%';
         }
