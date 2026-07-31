@@ -1178,3 +1178,10 @@ svg.stats {
 	color: var(--error-color);
 	margin-left: 2px;
 }
+
+.ghost-prediction {
+	color: var(--gray130);
+	font-style: italic;
+	user-select: none;
+	pointer-events: none;
+}
