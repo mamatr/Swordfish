@@ -229,4 +229,53 @@ describe('PredictionEngine', () => {
             assert.equal(withPreviousWord.source, 'glossary');
         });
     });
+
+    describe('frequency scoring', () => {
+
+        it('a file word seen once gets FILE_BASE_CONFIDENCE (0.80)', () => {
+            const engine = new PredictionEngine();
+            engine.buildIndex([{ target: 'saludos' }], [], []);
+            const result = engine.predict('sa');
+            assert.notEqual(result, null);
+            assert.equal(result.text, 'saludos');
+            assert.equal(result.source, 'file');
+            // n=1 -> 0.80 + 0.12 * (1 - 1/1) = 0.80
+            assert.equal(result.confidence, 0.80);
+        });
+
+        it('a file word seen 5 times beats a file word seen once', () => {
+            const engine = new PredictionEngine();
+            const file = [
+                { target: 'puerta' },
+                { target: 'puerta' },
+                { target: 'puerta' },
+                { target: 'puerta' },
+                { target: 'puerta' },
+                { target: 'pueblo' }
+            ];
+            engine.buildIndex(file, [], []);
+            const result = engine.predict('pu');
+            assert.equal(result.text, 'puerta');
+            assert.equal(result.source, 'file');
+            // n=5 -> 0.80 + 0.12 * (1 - 1/5) = 0.896
+            assert.equal(result.confidence, 0.80 + 0.12 * (1 - 1 / 5));
+            assert.ok(result.confidence > 0.80);
+        });
+
+        it('a file word seen 50 times reaches near-cap confidence, capped at FILE_FREQUENCY_CAP (0.92)', () => {
+            const engine = new PredictionEngine();
+            const file = [];
+            for (let i = 0; i < 50; i++) {
+                file.push({ target: 'transparente' });
+            }
+            engine.buildIndex(file, [], []);
+            const result = engine.predict('tr');
+            assert.equal(result.text, 'transparente');
+            assert.equal(result.source, 'file');
+            // n=50 -> 0.80 + 0.12 * (1 - 1/50) = 0.9176, below the 0.92 cap
+            assert.equal(result.confidence, 0.80 + 0.12 * (1 - 1 / 50));
+            assert.ok(result.confidence <= 0.92);
+            assert.ok(Math.abs(result.confidence - 0.92) < 0.01);
+        });
+    });
 });

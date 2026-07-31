@@ -139,9 +139,11 @@ class PrefixTrie {
 export class PredictionEngine {
 
     trie: PrefixTrie;
+    private frequency: Map<string, number>;
 
     constructor() {
         this.trie = new PrefixTrie();
+        this.frequency = new Map();
     }
 
     buildIndex(
@@ -151,6 +153,7 @@ export class PredictionEngine {
         mtMatch?: Match
     ): void {
         this.trie.clear();
+        this.frequency.clear();
 
         // Glossary terms: confidence 0.95
         for (const term of glossaryTerms) {
@@ -180,7 +183,18 @@ export class PredictionEngine {
             }
         }
 
-        // Previously translated file segments: confidence 0.80
+        // Previously translated file segments: frequency-weighted confidence.
+        // First pass: count every file-segment word occurrence.
+        for (const segment of fileSegments) {
+            if (segment.target) {
+                const targetText: string = segment.target.replace(/<[^>]*>/g, '');
+                const words: string[] = targetText.split(/\s+/);
+                for (const word of words) {
+                    this.countWord(word);
+                }
+            }
+        }
+        // Second pass: insert each word with the frequency-weighted confidence.
         for (const segment of fileSegments) {
             if (segment.target) {
                 const targetText: string = segment.target.replace(/<[^>]*>/g, '');
@@ -189,7 +203,7 @@ export class PredictionEngine {
                     this.trie.insert(word, {
                         text: word,
                         source: 'file',
-                        confidence: 0.80
+                        confidence: this.fileConfidence(word)
                     });
                 }
             }
@@ -235,15 +249,56 @@ export class PredictionEngine {
         const cleanText: string = targetText.replace(/<[^>]*>/g, '');
         const words: string[] = cleanText.split(/\s+/);
         for (const word of words) {
-            this.trie.insert(word, {
-                text: word,
-                source: source,
-                confidence: confidence
-            });
+            if (source === 'file') {
+                // For file entries the frequency formula wins: bump the word's
+                // count and re-insert with the updated confidence (merge-on-insert
+                // keeps the higher value). The confidence parameter is ignored.
+                this.countWord(word);
+                this.trie.insert(word, {
+                    text: word,
+                    source: 'file',
+                    confidence: this.fileConfidence(word)
+                });
+            } else {
+                this.trie.insert(word, {
+                    text: word,
+                    source: source,
+                    confidence: confidence
+                });
+            }
         }
+    }
+
+    /**
+     * Counts one occurrence of a word in the frequency map. Uses the same
+     * cleaning and minimum-length rules as PrefixTrie.insert so that counted
+     * keys always match inserted words.
+     */
+    private countWord(word: string): void {
+        const cleanWord: string = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+        if (cleanWord.length < MIN_TRIGGER_CHARS) {
+            return;
+        }
+        const key: string = cleanWord.toLowerCase();
+        this.frequency.set(key, (this.frequency.get(key) ?? 0) + 1);
+    }
+
+    /**
+     * Frequency-weighted confidence for a file word:
+     * min(0.80 + 0.12 * (1 - 1/count), 0.92)
+     * One occurrence -> 0.80; confidence rises with count and is clamped at
+     * FILE_FREQUENCY_CAP.
+     */
+    private fileConfidence(word: string): number {
+        const cleanWord: string = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+        const key: string = cleanWord.toLowerCase();
+        const count: number = this.frequency.get(key) ?? 1;
+        const weighted: number = FILE_BASE_CONFIDENCE + FILE_FREQUENCY_RANGE * (1 - 1 / count);
+        return Math.min(weighted, FILE_FREQUENCY_CAP);
     }
 
     clear(): void {
         this.trie.clear();
+        this.frequency.clear();
     }
 }
