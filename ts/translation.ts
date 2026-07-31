@@ -152,6 +152,7 @@ export class TranslationView {
     mtMatches: MtMatches | undefined;
     termsPanel: TermsPanel | undefined;
     predictionEngine: PredictionEngine;
+    private predictionListenersCell: HTMLTableCellElement | undefined;
 
     memSelect: HTMLSelectElement;
     glossSelect: HTMLSelectElement;
@@ -2526,10 +2527,16 @@ export class TranslationView {
         this.sourceTags = this.getTags(source);
 
         this.currentCell = this.currentRow.getElementsByClassName('target')[0] as HTMLTableCellElement;
-        this.currentCell.addEventListener('keyup', (event: KeyboardEvent) => {
-            this.changeListener();
-            this.handlePredictionInput(event);
-        });
+        // Attach the prediction listeners once per cell; re-selecting the
+        // same cell must not stack duplicate handlers (with two keyup
+        // handlers the second runs in the caret-before-ghost state and
+        // clears the ghost within the same event dispatch).
+        if (this.predictionListenersCell !== this.currentCell) {
+            this.currentCell.addEventListener('keyup', (event: KeyboardEvent) => {
+                this.changeListener();
+                this.handlePredictionInput(event);
+            });
+        }
 
         let currentTranslate: HTMLTableCellElement = this.currentRow.getElementsByClassName('translate')[0] as HTMLTableCellElement;
         // Apply highlightSpaces to ensure consistent comparison when leaving the segment
@@ -2565,31 +2572,34 @@ export class TranslationView {
         }
         this.centerRow(this.currentRow);
         this.currentCell.focus();
-        this.currentCell.addEventListener('keydown', (event: KeyboardEvent) => {
-            if (event.key === 'Tab') {
-                const ghost: HTMLSpanElement | null = this.currentCell?.querySelector('.ghost-prediction') as HTMLSpanElement | null;
-                if (ghost) {
-                    event.preventDefault();
-                    ghost.remove();
-                    // Insert the completion text at cursor
-                    const sel: Selection | null = window.getSelection();
-                    if (sel && sel.rangeCount) {
-                        const r: Range = sel.getRangeAt(0);
-                        r.insertNode(document.createTextNode(ghost.textContent || ''));
-                        r.collapse(false);
-                        sel.removeAllRanges();
-                        sel.addRange(r);
+        if (this.predictionListenersCell !== this.currentCell) {
+            this.currentCell.addEventListener('keydown', (event: KeyboardEvent) => {
+                if (event.key === 'Tab') {
+                    const ghost: HTMLSpanElement | null = this.currentCell?.querySelector('.ghost-prediction') as HTMLSpanElement | null;
+                    if (ghost) {
+                        event.preventDefault();
+                        ghost.remove();
+                        // Insert the completion text at cursor
+                        const sel: Selection | null = window.getSelection();
+                        if (sel && sel.rangeCount) {
+                            const r: Range = sel.getRangeAt(0);
+                            r.insertNode(document.createTextNode(ghost.textContent || ''));
+                            r.collapse(false);
+                            sel.removeAllRanges();
+                            sel.addRange(r);
+                        }
                     }
                 }
-            }
-            if (event.key === 'Escape') {
-                const ghost: HTMLSpanElement | null = this.currentCell?.querySelector('.ghost-prediction') as HTMLSpanElement | null;
-                if (ghost) {
-                    event.preventDefault();
-                    ghost.remove();
+                if (event.key === 'Escape') {
+                    const ghost: HTMLSpanElement | null = this.currentCell?.querySelector('.ghost-prediction') as HTMLSpanElement | null;
+                    if (ghost) {
+                        event.preventDefault();
+                        ghost.remove();
+                    }
                 }
-            }
-        });
+            });
+            this.predictionListenersCell = this.currentCell;
+        }
     }
 
     editSource(): void {
