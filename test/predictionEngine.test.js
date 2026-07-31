@@ -100,6 +100,36 @@ describe('PredictionEngine', () => {
         });
     });
 
+    describe('best-match weight', () => {
+
+        it('words from the best TM match outrank the same word from a weaker match', () => {
+            const engine = new PredictionEngine();
+            const best = [{ project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 95, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'hello', target: 'puerta casa', origin: 'tm' }];
+            const other = [{ project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '2', similarity: 80, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'world', target: 'puerta pueblo', origin: 'tm' }];
+            engine.buildIndex([], [...best, ...other], []);
+            // Shared word: best match gets 95/100 + 0.02 = 0.97, weaker gets 0.80
+            const result = engine.predict('pu');
+            assert.equal(result.text, 'puerta');
+            assert.equal(result.source, 'tm');
+            assert.equal(result.confidence, 0.95 + 0.02);
+            assert.ok(result.confidence > 0.80);
+            // Word only present in the non-best match keeps similarity / 100
+            const weaker = engine.predict('pueb');
+            assert.equal(weaker.text, 'pueblo');
+            assert.equal(weaker.confidence, 0.80);
+        });
+
+        it('builds the index without TM matches without crashing', () => {
+            const engine = new PredictionEngine();
+            engine.buildIndex([{ target: 'ventana' }], [], []);
+            const result = engine.predict('ve');
+            assert.notEqual(result, null);
+            assert.equal(result.text, 'ventana');
+            assert.equal(result.source, 'file');
+            assert.equal(result.confidence, 0.80);
+        });
+    });
+
     describe('HTML stripping', () => {
 
         it('strips HTML tags from target text before tokenizing', () => {

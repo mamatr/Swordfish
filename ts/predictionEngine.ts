@@ -168,16 +168,25 @@ export class PredictionEngine {
             }
         }
 
-        // TM matches: confidence = similarity / 100 (only ≥ 70%)
+        // TM matches: confidence = similarity / 100 (only ≥ 70%).
+        // Words from the best TM match get BEST_MATCH_BONUS on top, so the
+        // strongest match's words outrank the same word from weaker matches.
+        let bestSim: number = 0;
+        for (const match of tmMatches) {
+            if (match.similarity > bestSim) {
+                bestSim = match.similarity;
+            }
+        }
         for (const match of tmMatches) {
             if (match.similarity >= 70) {
+                const isBest: boolean = match.similarity === bestSim;
                 const targetText: string = match.target.replace(/<[^>]*>/g, '');
                 const words: string[] = targetText.split(/\s+/);
                 for (const word of words) {
                     this.trie.insert(word, {
                         text: word,
                         source: 'tm',
-                        confidence: match.similarity / 100
+                        confidence: isBest ? match.similarity / 100 + BEST_MATCH_BONUS : match.similarity / 100
                     });
                 }
             }
