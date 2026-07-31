@@ -86,7 +86,15 @@ npx --yes @electron/packager . Swordfish \
     --arch=arm64 \
     --overwrite \
     --out="$RELEASE_BUILD_DIR" \
-    --icon="$ICON_ICNS"
+    --icon="$ICON_ICNS" \
+    --ignore='^/\.claude' \
+    --ignore='^/\.gradle' \
+    --ignore='^/release-build' \
+    --ignore='^/build' \
+    --ignore='^/out' \
+    --ignore='^/dist' \
+    --ignore='^/jars/swordfish\.jar$' \
+    --asar=false
 
 DMG_NAME="Swordfish-${VERSION}-arm64.dmg"
 DMG_PATH="$RELEASE_BUILD_DIR/$DMG_NAME"
