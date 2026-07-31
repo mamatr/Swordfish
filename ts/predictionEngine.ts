@@ -106,7 +106,8 @@ export class PredictionEngine {
 
         // Glossary terms: confidence 0.95
         for (const term of glossaryTerms) {
-            const words: string[] = term.target.split(/\s+/);
+            const targetText: string = term.target.replace(/<[^>]*>/g, '');
+            const words: string[] = targetText.split(/\s+/);
             for (const word of words) {
                 this.trie.insert(word, {
                     text: word,
@@ -119,7 +120,8 @@ export class PredictionEngine {
         // TM matches: confidence = similarity / 100 (only ≥ 70%)
         for (const match of tmMatches) {
             if (match.similarity >= 70) {
-                const words: string[] = match.target.split(/\s+/);
+                const targetText: string = match.target.replace(/<[^>]*>/g, '');
+                const words: string[] = targetText.split(/\s+/);
                 for (const word of words) {
                     this.trie.insert(word, {
                         text: word,
@@ -133,7 +135,8 @@ export class PredictionEngine {
         // Previously translated file segments: confidence 0.80
         for (const segment of fileSegments) {
             if (segment.target) {
-                const words: string[] = segment.target.split(/\s+/);
+                const targetText: string = segment.target.replace(/<[^>]*>/g, '');
+                const words: string[] = targetText.split(/\s+/);
                 for (const word of words) {
                     this.trie.insert(word, {
                         text: word,
@@ -146,7 +149,8 @@ export class PredictionEngine {
 
         // MT match if present: confidence 0.60
         if (mtMatch && mtMatch.target) {
-            const words: string[] = mtMatch.target.split(/\s+/);
+            const targetText: string = mtMatch.target.replace(/<[^>]*>/g, '');
+            const words: string[] = targetText.split(/\s+/);
             for (const word of words) {
                 this.trie.insert(word, {
                     text: word,
@@ -165,7 +169,8 @@ export class PredictionEngine {
     }
 
     addEntry(targetText: string, source: Prediction['source'], confidence: number): void {
-        const words: string[] = targetText.split(/\s+/);
+        const cleanText: string = targetText.replace(/<[^>]*>/g, '');
+        const words: string[] = cleanText.split(/\s+/);
         for (const word of words) {
             this.trie.insert(word, {
                 text: word,
