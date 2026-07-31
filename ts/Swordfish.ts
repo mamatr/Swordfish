@@ -1798,6 +1798,9 @@ export class Swordfish {
         let reloadMemories: boolean = this.currentPreferences.memoriesFolder !== preferences.memoriesFolder;
         let reloadGlossaries: boolean = this.currentPreferences.glossariesFolder !== preferences.glossariesFolder;
         writeFileSync(join(app.getPath('appData'), app.name, 'preferences.json'), JSON.stringify(preferences, null, 2));
+        // Broadcast the updated preferences so open views (e.g. the typing
+        // prediction flag) apply them without an app restart
+        this.mainWindow.webContents.send('set-preferences', preferences);
         Swordfish.loadPreferences();
         Swordfish.setTheme();
         Swordfish.mainWindow.webContents.send('set-zoom', { zoom: Swordfish.currentPreferences.zoomFactor });
