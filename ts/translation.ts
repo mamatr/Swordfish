@@ -22,7 +22,7 @@ import { Tab } from "./tabs.js";
 import { TermsPanel } from "./termsPanel.js";
 import { TmMatches } from "./tmMatches.js";
 import { Term } from "./term.js";
-import { Prediction, PredictionEngine } from "./predictionEngine.js";
+import { Prediction, PredictionContext, PredictionEngine } from "./predictionEngine.js";
 
 export class TranslationView {
 
@@ -2399,7 +2399,11 @@ export class TranslationView {
             return;
         }
 
-        const prediction: Prediction | null = this.predictionEngine.predict(fragment);
+        // Pass the current source text so the engine can boost words whose
+        // source overlaps it. previousWord is left undefined (added later).
+        const sourceText: string = this.currentRow?.getElementsByClassName('source')[0]?.textContent || '';
+        const context: PredictionContext = { sourceText };
+        const prediction: Prediction | null = this.predictionEngine.predict(fragment, context);
         if (prediction) {
             // The engine returns the full word; the ghost must only show the
             // completion suffix, otherwise the typed prefix would duplicate.
@@ -2856,17 +2860,25 @@ export class TranslationView {
         }
 
         // Gather previously translated segments from the current file
-        let fileSegments: { target: string }[] = [];
+        let fileSegments: { target: string; source?: string }[] = [];
         if (this.currentId.file) {
             const rows: HTMLCollectionOf<HTMLTableRowElement> = this.tbody.getElementsByTagName('tr');
             for (let i: number = 0; i < rows.length; i++) {
                 const row: HTMLTableRowElement = rows[i];
+                if (row === this.currentRow) {
+                    // Skip the row being translated: its words are already in
+                    // the index via the in-progress target, and its source must
+                    // not be used to boost its own predictions.
+                    continue;
+                }
                 if (row.getAttribute('data-file') !== this.currentId.file) {
                     continue;
                 }
                 const targetCell: HTMLTableCellElement = row.getElementsByClassName('target')[0] as HTMLTableCellElement;
                 if (targetCell && targetCell.textContent && targetCell.textContent.trim() !== '') {
-                    fileSegments.push({ target: targetCell.textContent.trim() });
+                    const sourceCell: HTMLTableCellElement = row.getElementsByClassName('source')[0] as HTMLTableCellElement;
+                    const sourceText: string = sourceCell.textContent?.trim() || '';
+                    fileSegments.push({ target: targetCell.textContent.trim(), source: sourceText });
                 }
             }
         }

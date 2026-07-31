@@ -140,6 +140,8 @@ export class PredictionEngine {
 
     trie: PrefixTrie;
     private frequency: Map<string, number>;
+    private contextSources: string[][] = [];  // token arrays per source index
+    private wordSources: Map<string, number[]> = new Map();  // word → source indices
 
     constructor() {
         this.trie = new PrefixTrie();
@@ -147,13 +149,15 @@ export class PredictionEngine {
     }
 
     buildIndex(
-        fileSegments: { target: string }[],
+        fileSegments: { target: string; source?: string }[],
         tmMatches: Match[],
         glossaryTerms: Term[],
         mtMatch?: Match
     ): void {
         this.trie.clear();
         this.frequency.clear();
+        this.contextSources = [];
+        this.wordSources = new Map();
 
         // Glossary terms: confidence 0.95
         for (const term of glossaryTerms) {
@@ -181,6 +185,7 @@ export class PredictionEngine {
             if (match.similarity >= 70) {
                 const isBest: boolean = match.similarity === bestSim;
                 const targetText: string = match.target.replace(/<[^>]*>/g, '');
+                const sourceIndex: number = this.registerSource(match.source);
                 const words: string[] = targetText.split(/\s+/);
                 for (const word of words) {
                     this.trie.insert(word, {
@@ -188,6 +193,9 @@ export class PredictionEngine {
                         source: 'tm',
                         confidence: isBest ? match.similarity / 100 + BEST_MATCH_BONUS : match.similarity / 100
                     });
+                    if (sourceIndex >= 0) {
+                        this.recordWordSource(word, sourceIndex);
+                    }
                 }
             }
         }
@@ -207,6 +215,7 @@ export class PredictionEngine {
         for (const segment of fileSegments) {
             if (segment.target) {
                 const targetText: string = segment.target.replace(/<[^>]*>/g, '');
+                const sourceIndex: number = this.registerSource(segment.source ?? '');
                 const words: string[] = targetText.split(/\s+/);
                 for (const word of words) {
                     this.trie.insert(word, {
@@ -214,6 +223,9 @@ export class PredictionEngine {
                         source: 'file',
                         confidence: this.fileConfidence(word)
                     });
+                    if (sourceIndex >= 0) {
+                        this.recordWordSource(word, sourceIndex);
+                    }
                 }
             }
         }
@@ -236,16 +248,20 @@ export class PredictionEngine {
         if (wordPrefix.length < MIN_TRIGGER_CHARS) {
             return null;
         }
-        // context is optional: re-ranking with sourceText/previousWord is added
-        // in later tasks; for now every candidate scores its base confidence.
         const candidates: Candidate[] = this.trie.collect(wordPrefix, CANDIDATE_LIMIT);
         if (candidates.length === 0) {
             return null;
         }
+        // When context is provided, candidates whose source text overlaps the
+        // current segment's source get a boost (glossary words never do).
+        const contextTokens: string[] = context ? this.tokenizeSource(context.sourceText) : [];
         let best: Candidate | null = null;
         let bestScore: number = -1;
         for (const candidate of candidates) {
-            const score: number = candidate.prediction.confidence;
+            const base: number = candidate.prediction.confidence;
+            const score: number = context
+                ? Math.min(base + this.sourceBoost(candidate, contextTokens), CONFIDENCE_CAP)
+                : base;
             if (score > bestScore) {
                 best = candidate;
                 bestScore = score;
@@ -279,6 +295,91 @@ export class PredictionEngine {
     }
 
     /**
+     * Tokenizes source text for overlap scoring: lowercase, whitespace-split,
+     * strips surrounding punctuation from each token, drops tokens shorter
+     * than MIN_WORD_LENGTH, and de-duplicates.
+     */
+    private tokenizeSource(text: string): string[] {
+        const tokens: string[] = [];
+        for (const raw of text.toLowerCase().split(/\s+/)) {
+            const clean: string = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+            if (clean.length >= MIN_WORD_LENGTH && !tokens.includes(clean)) {
+                tokens.push(clean);
+            }
+        }
+        return tokens;
+    }
+
+    /**
+     * Stores the tokenized source text of a TM match or file segment and
+     * returns its index in contextSources, or -1 when the source has no
+     * usable tokens.
+     */
+    private registerSource(source: string): number {
+        const tokens: string[] = this.tokenizeSource(source);
+        if (tokens.length === 0) {
+            return -1;
+        }
+        this.contextSources.push(tokens);
+        return this.contextSources.length - 1;
+    }
+
+    /**
+     * Links a target word to the source index it came from. Uses the same
+     * cleaning and minimum-length rules as PrefixTrie.insert so that
+     * wordSources keys always match collected candidate keys.
+     */
+    private recordWordSource(word: string, sourceIndex: number): void {
+        const cleanWord: string = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+        const key: string = cleanWord.toLowerCase();
+        if (key.length < MIN_TRIGGER_CHARS) {
+            return;
+        }
+        const indices: number[] | undefined = this.wordSources.get(key);
+        if (indices) {
+            if (!indices.includes(sourceIndex)) {
+                indices.push(sourceIndex);
+            }
+        } else {
+            this.wordSources.set(key, [sourceIndex]);
+        }
+    }
+
+    /**
+     * Source-overlap boost for one candidate: the max over all sources that
+     * produced the word of |contextTokens ∩ sourceTokens| / |contextTokens|,
+     * scaled by SOURCE_BOOST_MAX, reaching full boost at or above
+     * SOURCE_BOOST_THRESHOLD overlap. Glossary candidates are never boosted.
+     */
+    private sourceBoost(candidate: Candidate, contextTokens: string[]): number {
+        if (candidate.prediction.source === 'glossary') {
+            return 0;
+        }
+        if (contextTokens.length === 0) {
+            return 0;
+        }
+        const indices: number[] | undefined = this.wordSources.get(candidate.key);
+        if (!indices || indices.length === 0) {
+            return 0;
+        }
+        let maxOverlap: number = 0;
+        for (const index of indices) {
+            const sourceTokens: string[] = this.contextSources[index];
+            let intersection: number = 0;
+            for (const token of contextTokens) {
+                if (sourceTokens.includes(token)) {
+                    intersection++;
+                }
+            }
+            const overlap: number = intersection / Math.max(1, contextTokens.length);
+            if (overlap > maxOverlap) {
+                maxOverlap = overlap;
+            }
+        }
+        return SOURCE_BOOST_MAX * Math.min(1, maxOverlap / SOURCE_BOOST_THRESHOLD);
+    }
+
+    /**
      * Counts one occurrence of a word in the frequency map. Uses the same
      * cleaning and minimum-length rules as PrefixTrie.insert so that counted
      * keys always match inserted words.
@@ -309,5 +410,7 @@ export class PredictionEngine {
     clear(): void {
         this.trie.clear();
         this.frequency.clear();
+        this.contextSources = [];
+        this.wordSources = new Map();
     }
 }

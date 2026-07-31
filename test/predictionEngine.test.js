@@ -260,6 +260,53 @@ describe('PredictionEngine', () => {
         });
     });
 
+    describe('source-context boost', () => {
+
+        it('word from a TM match whose source overlaps the current source beats a same-confidence word without overlap', () => {
+            const engine = new PredictionEngine();
+            // Same base confidence (both 80% + best-match bonus 0.02 = 0.82);
+            // only the source overlap differs.
+            const overlapping = [{ project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 80, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'open the file', target: 'archivo', origin: 'tm' }];
+            const unrelated = [{ project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '2', similarity: 80, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'close the window', target: 'arena', origin: 'tm' }];
+            engine.buildIndex([], [...overlapping, ...unrelated], []);
+            // Context overlaps 'open the file' fully (3/3 -> maxOverlap 1.0 ->
+            // full SOURCE_BOOST_MAX 0.10); 'arena' shares only 'the' (1/3).
+            const result = engine.predict('ar', { sourceText: 'open the file' });
+            assert.equal(result.text, 'archivo');
+            assert.equal(result.source, 'tm');
+            // 0.80 + 0.02 bonus + 0.10 boost = 0.92, under the 0.99 cap
+            assert.equal(result.confidence, 80 / 100 + 0.02 + 0.10);
+            assert.ok(result.confidence > 0.90);
+        });
+
+        it('word with no source overlap gets no boost (same base confidence)', () => {
+            const engine = new PredictionEngine();
+            const tm = [{ project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 80, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'totally unrelated words here', target: 'puerta', origin: 'tm' }];
+            engine.buildIndex([], tm, []);
+            const base = engine.predict('pu');
+            const withContext = engine.predict('pu', { sourceText: 'xyz zzz qqq' });
+            assert.equal(withContext.text, 'puerta');
+            assert.equal(withContext.confidence, base.confidence);
+            // A file segment without source text also gets no boost
+            const engine2 = new PredictionEngine();
+            engine2.buildIndex([{ target: 'ventana' }], [], []);
+            const base2 = engine2.predict('ve');
+            const withContext2 = engine2.predict('ve', { sourceText: 'xyz zzz qqq' });
+            assert.equal(withContext2.confidence, base2.confidence);
+        });
+
+        it('glossary words never receive source boost', () => {
+            const engine = new PredictionEngine();
+            const glossary = [{ srcLang: 'en', tgtLang: 'es', source: 'cat sat on mat', target: 'gato', origin: 'gloss' }];
+            engine.buildIndex([], [], glossary);
+            // Perfect overlap, but glossary candidates are exempt
+            const result = engine.predict('ga', { sourceText: 'cat sat on mat' });
+            assert.equal(result.text, 'gato');
+            assert.equal(result.source, 'glossary');
+            assert.equal(result.confidence, 0.95);
+        });
+    });
+
     describe('frequency scoring', () => {
 
         it('a file word seen once gets FILE_BASE_CONFIDENCE (0.80)', () => {
