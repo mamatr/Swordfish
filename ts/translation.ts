@@ -2583,7 +2583,7 @@ export class TranslationView {
         this.currentCell.focus();
         if (this.predictionListenersCell !== this.currentCell) {
             this.currentCell.addEventListener('keydown', (event: KeyboardEvent) => {
-                if (event.key === 'Tab') {
+                if (event.key === 'Tab' || event.key === 'Enter') {
                     const ghost: HTMLSpanElement | null = this.currentCell?.querySelector('.ghost-prediction') as HTMLSpanElement | null;
                     if (ghost) {
                         event.preventDefault();

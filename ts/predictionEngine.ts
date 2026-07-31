@@ -33,11 +33,13 @@ class PrefixTrie {
     }
 
     insert(word: string, prediction: Prediction): void {
-        if (word.length < 2) {
+        // Strip leading/trailing punctuation from the word
+        const cleanWord: string = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+        if (cleanWord.length < 2) {
             return;
         }
         let node: TrieNode = this.root;
-        const key: string = word.toLowerCase();
+        const key: string = cleanWord.toLowerCase();
         for (const ch of key) {
             if (!node.children.has(ch)) {
                 node.children.set(ch, { children: new Map(), completions: [] });
@@ -45,7 +47,13 @@ class PrefixTrie {
             node = node.children.get(ch) as TrieNode;
         }
         // Insert at terminal node, keep top 3 by confidence
-        node.completions.push(prediction);
+        // Store the cleaned word as the completion text
+        const cleanPrediction: Prediction = {
+            text: cleanWord,
+            source: prediction.source,
+            confidence: prediction.confidence
+        };
+        node.completions.push(cleanPrediction);
         node.completions.sort((a: Prediction, b: Prediction): number => b.confidence - a.confidence);
         if (node.completions.length > 3) {
             node.completions.length = 3;
