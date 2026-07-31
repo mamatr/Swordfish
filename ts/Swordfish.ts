@@ -1311,8 +1311,8 @@ export class Swordfish {
         let nextUntranslatedKey: string = 'Alt+Down';
         let nextUnconfirmedKey: string = 'Alt+Shift+Down';
         if (process.platform === 'darwin') {
-            nextUntranslatedKey = 'Ctrl+Alt+Down';
-            nextUnconfirmedKey = 'Ctrl+Shift+Down';
+            nextUntranslatedKey = 'Cmd+Enter';
+            nextUnconfirmedKey = 'Cmd+Shift+Enter';
         }
         let insrtTermsMenu: Menu = Menu.buildFromTemplate([
             { label: 'Insert  Term "1"', accelerator: 'CmdOrCtrl+Alt+1', click: () => { Swordfish.mainWindow.webContents.send('insert-tem', { term: 1 }); } },

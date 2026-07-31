@@ -7,7 +7,7 @@ defaultTasks 'dist'
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(26)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -111,8 +111,9 @@ tasks.register('linkJava', Exec) {
     def jmodsPath = javaHome + fileSeparator + 'jmods'
     def modulePath = 'jars' + pathSeparator + jmodsPath
     
-    // Use jlink command - works cross-platform
-    commandLine 'jlink',
+    // Use JDK's jlink (not PATH) to ensure version matches
+    def jlinkPath = javaHome + fileSeparator + 'bin' + fileSeparator + 'jlink'
+    commandLine jlinkPath,
         '--module-path', modulePath,
         '--add-modules', 'swordfish',
         '--output', 'dist',
