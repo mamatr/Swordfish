@@ -183,4 +183,50 @@ describe('PredictionEngine', () => {
             assert.equal(engine.predict('ad').text, 'adiós');
         });
     });
+
+    describe('candidate collection', () => {
+
+        it('predict() with no context behaves exactly like before (best base confidence wins)', () => {
+            const engine = new PredictionEngine();
+            // glossary 0.95 beats TM 0.90 for the same prefix
+            const glossary = [{ srcLang: 'en', tgtLang: 'es', source: 'hello', target: 'hola', origin: 'gloss' }];
+            const tm = [{ project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 90, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'hello', target: 'hora', origin: 'tm' }];
+            engine.buildIndex([], tm, glossary);
+            const result = engine.predict('ho');
+            assert.equal(result.text, 'hola');
+            assert.equal(result.source, 'glossary');
+            assert.equal(result.confidence, 0.95);
+        });
+
+        it('collect() returns distinct words, limited to the limit param', () => {
+            const engine = new PredictionEngine();
+            const glossary = [
+                { srcLang: 'en', tgtLang: 'es', source: 'a', target: 'hola', origin: 'gloss' },
+                { srcLang: 'en', tgtLang: 'es', source: 'b', target: 'hora', origin: 'gloss' },
+                { srcLang: 'en', tgtLang: 'es', source: 'c', target: 'hoyo', origin: 'gloss' }
+            ];
+            engine.buildIndex([], [], glossary);
+            // Same word from a second source must still count once
+            engine.addEntry('hola', 'file', 0.80);
+            const limited = engine.trie.collect('ho', 2);
+            assert.equal(limited.length, 2);
+            const all = engine.trie.collect('ho', 10);
+            assert.equal(all.length, 3);
+            // Distinct by lowercase key
+            const keys = all.map((c) => c.key).sort();
+            assert.deepEqual(keys, ['hola', 'hora', 'hoyo']);
+        });
+
+        it('predict() accepts an optional context param without breaking', () => {
+            const engine = new PredictionEngine();
+            const glossary = [{ srcLang: 'en', tgtLang: 'es', source: 'cat', target: 'gato', origin: 'gloss' }];
+            engine.buildIndex([], [], glossary);
+            const withSourceText = engine.predict('ga', { sourceText: 'the cat sat' });
+            assert.equal(withSourceText.text, 'gato');
+            assert.equal(withSourceText.confidence, 0.95);
+            const withPreviousWord = engine.predict('ga', { sourceText: 'the cat sat', previousWord: 'the' });
+            assert.equal(withPreviousWord.text, 'gato');
+            assert.equal(withPreviousWord.source, 'glossary');
+        });
+    });
 });
