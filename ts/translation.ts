@@ -2360,6 +2360,115 @@ export class TranslationView {
         }, 100);
     }
 
+    handlePredictionInput(event: KeyboardEvent): void {
+        if (!TranslationView.enablePrediction) {
+            return;
+        }
+        // Don't predict on navigation keys
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' ||
+            event.key === 'ArrowUp' || event.key === 'ArrowDown' ||
+            event.key === 'Home' || event.key === 'End' ||
+            event.key === 'Tab' || event.key === 'Escape') {
+            this.clearGhost();
+            return;
+        }
+
+        const fragment: string = this.extractWordAtCursor();
+        if (fragment.length < 2) {
+            this.clearGhost();
+            return;
+        }
+
+        const prediction: Prediction | null = this.predictionEngine.predict(fragment);
+        if (prediction) {
+            this.renderGhost(prediction.text);
+        } else {
+            this.clearGhost();
+        }
+    }
+
+    extractWordAtCursor(): string {
+        const selection: Selection | null = window.getSelection();
+        if (!selection || !selection.rangeCount) {
+            return '';
+        }
+
+        const range: Range = selection.getRangeAt(0);
+        if (!this.currentCell || !this.currentCell.contains(range.startContainer)) {
+            return '';
+        }
+
+        // Walk backward from cursor collecting text until whitespace or tag boundary
+        let text: string = '';
+        let node: Node | null = range.startContainer;
+        let offset: number = range.startOffset;
+
+        // Get text before cursor in the current text node
+        if (node.nodeType === Node.TEXT_NODE && node.textContent) {
+            text = node.textContent.substring(0, offset);
+        }
+
+        // Walk to previous text nodes within the target cell
+        while (node && node !== this.currentCell) {
+            if (node.previousSibling) {
+                node = node.previousSibling;
+                if (node.nodeType === Node.TEXT_NODE && node.textContent) {
+                    text = node.textContent + text;
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    // Hit a tag or span — stop
+                    break;
+                }
+            } else {
+                node = node.parentNode;
+                if (node === this.currentCell) {
+                    break;
+                }
+            }
+        }
+
+        // Extract the last contiguous non-whitespace fragment
+        const match: RegExpMatchArray | null = text.match(/(\S+)$/);
+        return match ? match[1] : '';
+    }
+
+    renderGhost(completion: string): void {
+        this.clearGhost();
+
+        const selection: Selection | null = window.getSelection();
+        if (!selection || !selection.rangeCount) {
+            return;
+        }
+
+        const range: Range = selection.getRangeAt(0);
+        if (!this.currentCell || !this.currentCell.contains(range.startContainer)) {
+            return;
+        }
+
+        const ghostSpan: HTMLSpanElement = document.createElement('span');
+        ghostSpan.className = 'ghost-prediction';
+        ghostSpan.contentEditable = 'false';
+        ghostSpan.textContent = completion;
+
+        // Insert ghost span at cursor position
+        range.collapse(false);
+        range.insertNode(ghostSpan);
+
+        // Move cursor back before the ghost span
+        const newRange: Range = document.createRange();
+        newRange.setStartBefore(ghostSpan);
+        newRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+    }
+
+    clearGhost(): void {
+        if (!this.currentCell) {
+            return;
+        }
+        const ghosts: NodeListOf<HTMLSpanElement> = this.currentCell.querySelectorAll('.ghost-prediction');
+        ghosts.forEach((g: HTMLSpanElement) => g.remove());
+    }
+
     changeListener(): void {
         if (this.currentContent === this.currentCell?.innerHTML) {
             return;
@@ -2660,6 +2769,47 @@ export class TranslationView {
 
     setTerms(terms: any[]): void {
         this.termsPanel?.setTerms(terms);
+        this.updatePredictionIndex();
+    }
+
+    updatePredictionIndex(): void {
+        // Gather TM matches
+        let tmMatchList: Match[] = [];
+        if (this.tmMatches) {
+            for (const match of this.tmMatches.matches.values()) {
+                tmMatchList.push(match);
+            }
+        }
+
+        // Gather glossary terms
+        let glossaryTerms: Term[] = [];
+        if (this.termsPanel) {
+            glossaryTerms = this.termsPanel.terms;
+        }
+
+        // Gather previously translated segments from the current file
+        let fileSegments: { target: string }[] = [];
+        if (this.currentId.file) {
+            const rows: HTMLCollectionOf<HTMLTableRowElement> = this.tbody.getElementsByTagName('tr');
+            for (let i: number = 0; i < rows.length; i++) {
+                const row: HTMLTableRowElement = rows[i];
+                if (row.getAttribute('data-file') !== this.currentId.file) {
+                    continue;
+                }
+                const targetCell: HTMLTableCellElement = row.getElementsByClassName('target')[0] as HTMLTableCellElement;
+                if (targetCell && targetCell.textContent && targetCell.textContent.trim() !== '') {
+                    fileSegments.push({ target: targetCell.textContent.trim() });
+                }
+            }
+        }
+
+        // Gather MT match if any
+        let mtMatch: Match | undefined = undefined;
+        if (this.mtMatches && this.mtMatches.matches.size > 0) {
+            mtMatch = this.mtMatches.matches.values().next().value;
+        }
+
+        this.predictionEngine.buildIndex(fileSegments, tmMatchList, glossaryTerms, mtMatch);
     }
 
     setTarget(arg: any): void {
