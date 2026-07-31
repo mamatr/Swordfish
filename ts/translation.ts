@@ -21,6 +21,8 @@ import { FullId, SegmentId } from "./segmentId.js";
 import { Tab } from "./tabs.js";
 import { TermsPanel } from "./termsPanel.js";
 import { TmMatches } from "./tmMatches.js";
+import { Term } from "./term.js";
+import { Prediction, PredictionEngine } from "./predictionEngine.js";
 
 export class TranslationView {
 
@@ -73,6 +75,7 @@ export class TranslationView {
     static NOTE_FRAGMENT: string = 'M20 2H4c-1.1 0-1.99';
     static readonly MIN_PANEL_WIDTH: number = 40;
     static readonly MIN_SUBPANEL_HEIGHT: number = 40;
+    static enablePrediction: boolean = true;
 
     container: HTMLDivElement;
     topBar: HTMLDivElement;
@@ -148,6 +151,7 @@ export class TranslationView {
     tmMatches: TmMatches | undefined;
     mtMatches: MtMatches | undefined;
     termsPanel: TermsPanel | undefined;
+    predictionEngine: PredictionEngine;
 
     memSelect: HTMLSelectElement;
     glossSelect: HTMLSelectElement;
@@ -174,6 +178,13 @@ export class TranslationView {
         this.statistics = document.createElement('div');
 
         this.sourceTags = new Map<string, string>();
+        this.predictionEngine = new PredictionEngine();
+        ipcRenderer.send('get-preferences');
+        ipcRenderer.on('set-preferences', (event: IpcRendererEvent, arg: any) => {
+            if (typeof arg.enableTypingPrediction === 'boolean') {
+                TranslationView.enablePrediction = arg.enableTypingPrediction;
+            }
+        });
         this.topBar = document.createElement('div');
         this.topBar.className = 'toolbar';
         this.container.appendChild(this.topBar);
