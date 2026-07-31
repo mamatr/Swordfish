@@ -106,7 +106,7 @@ export class Swordfish {
         caseSensitiveSearches: false,
         caseSensitiveMatches: true,
         autoConfirm: false,
-        enableTypingPrediction: false,
+        enableTypingPrediction: true,
         matchThreshold: 60,
         google: {
             enabled: false,
@@ -1707,6 +1707,10 @@ export class Swordfish {
                 }
                 if (!json.hasOwnProperty('matchThreshold')) {
                     json.matchThreshold = 60;
+                    needsSaving = true;
+                }
+                if (!json.hasOwnProperty('enableTypingPrediction')) {
+                    json.enableTypingPrediction = true;
                     needsSaving = true;
                 }
                 Swordfish.currentPreferences = json;
