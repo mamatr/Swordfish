@@ -2370,7 +2370,7 @@ export class TranslationView {
         }
         // Clear ghost on word boundaries: typing whitespace ends the current
         // word, so a pending ghost would be stale. This must run before the
-        // fragment-length checks — extractWordAtCursor() returns '' for a
+        // fragment-length checks — extractWordContext() returns '' for a
         // trailing space, which the empty-fragment guard below would
         // otherwise mistake for an unrelated keyup (modifier release, ...).
         if (event.key === ' ' || event.key === 'Enter') {
@@ -2386,9 +2386,9 @@ export class TranslationView {
             return;
         }
 
-        const fragment: string = this.extractWordAtCursor();
+        const { fragment, previousWord } = this.extractWordContext();
         // After renderGhost the caret rests before the ghost span, where
-        // extractWordAtCursor returns ''. The ghost is the pending text, so
+        // extractWordContext returns ''. The ghost is the pending text, so
         // ignore unrelated keyups (modifier releases, Insert, F-keys, ...)
         // instead of dismissing the ghost.
         if (fragment.length === 0 && this.currentCell?.querySelector('.ghost-prediction')) {
@@ -2400,9 +2400,10 @@ export class TranslationView {
         }
 
         // Pass the current source text so the engine can boost words whose
-        // source overlaps it. previousWord is left undefined (added later).
+        // source overlaps it, and the word before the cursor so it can boost
+        // words that frequently follow that word (bigram context).
         const sourceText: string = this.currentRow?.getElementsByClassName('source')[0]?.textContent || '';
-        const context: PredictionContext = { sourceText };
+        const context: PredictionContext = { sourceText, previousWord };
         const prediction: Prediction | null = this.predictionEngine.predict(fragment, context);
         if (prediction) {
             // The engine returns the full word; the ghost must only show the
@@ -2419,15 +2420,15 @@ export class TranslationView {
         }
     }
 
-    extractWordAtCursor(): string {
+    extractWordContext(): { fragment: string; previousWord: string } {
         const selection: Selection | null = window.getSelection();
         if (!selection || !selection.rangeCount) {
-            return '';
+            return { fragment: '', previousWord: '' };
         }
 
         const range: Range = selection.getRangeAt(0);
         if (!this.currentCell || !this.currentCell.contains(range.startContainer)) {
-            return '';
+            return { fragment: '', previousWord: '' };
         }
 
         // Walk backward from cursor collecting text until whitespace or tag boundary
@@ -2459,8 +2460,18 @@ export class TranslationView {
         }
 
         // Extract the last contiguous non-whitespace fragment
-        const match: RegExpMatchArray | null = text.match(/(\S+)$/);
-        return match ? match[1] : '';
+        const fragmentMatch: RegExpMatchArray | null = text.match(/(\S+)$/);
+        const fragment: string = fragmentMatch ? fragmentMatch[1] : '';
+
+        // Walk one word boundary further back to capture the word before the
+        // current fragment. Surrounding punctuation is stripped so the value
+        // matches the cleaned keys of the engine's bigram map.
+        const beforeFragment: string = fragmentMatch ? text.substring(0, fragmentMatch.index as number) : text;
+        const previousMatch: RegExpMatchArray | null = beforeFragment.match(/(\S+)\s*$/);
+        const previousWord: string = previousMatch
+            ? previousMatch[1].replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
+            : '';
+        return { fragment, previousWord };
     }
 
     renderGhost(completion: string): void {

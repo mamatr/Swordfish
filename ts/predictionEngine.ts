@@ -142,6 +142,7 @@ export class PredictionEngine {
     private frequency: Map<string, number>;
     private contextSources: string[][] = [];  // token arrays per source index
     private wordSources: Map<string, number[]> = new Map();  // word → source indices
+    private bigrams: Map<string, Map<string, number>> = new Map();  // prev word → next word → count
 
     constructor() {
         this.trie = new PrefixTrie();
@@ -158,6 +159,7 @@ export class PredictionEngine {
         this.frequency.clear();
         this.contextSources = [];
         this.wordSources = new Map();
+        this.bigrams = new Map();
 
         // Glossary terms: confidence 0.95
         for (const term of glossaryTerms) {
@@ -170,6 +172,8 @@ export class PredictionEngine {
                     confidence: 0.95
                 });
             }
+            // Multi-word glossary terms contribute bigrams like any other source
+            this.recordBigrams(words);
         }
 
         // TM matches: confidence = similarity / 100 (only ≥ 70%).
@@ -197,6 +201,7 @@ export class PredictionEngine {
                         this.recordWordSource(word, sourceIndex);
                     }
                 }
+                this.recordBigrams(words);
             }
         }
 
@@ -227,6 +232,7 @@ export class PredictionEngine {
                         this.recordWordSource(word, sourceIndex);
                     }
                 }
+                this.recordBigrams(words);
             }
         }
 
@@ -241,6 +247,7 @@ export class PredictionEngine {
                     confidence: 0.60
                 });
             }
+            this.recordBigrams(words);
         }
     }
 
@@ -254,14 +261,23 @@ export class PredictionEngine {
         }
         // When context is provided, candidates whose source text overlaps the
         // current segment's source get a boost (glossary words never do).
+        // When the context also carries the previous word, candidates that
+        // frequently follow it in the indexed targets get a bigram boost.
         const contextTokens: string[] = context ? this.tokenizeSource(context.sourceText) : [];
+        const previousWord: string = context?.previousWord?.toLowerCase().trim() ?? '';
+        const bigramRow: Map<string, number> | undefined = previousWord.length > 0 ? this.bigrams.get(previousWord) : undefined;
         let best: Candidate | null = null;
         let bestScore: number = -1;
         for (const candidate of candidates) {
             const base: number = candidate.prediction.confidence;
-            const score: number = context
-                ? Math.min(base + this.sourceBoost(candidate, contextTokens), CONFIDENCE_CAP)
-                : base;
+            let boost: number = context ? this.sourceBoost(candidate, contextTokens) : 0;
+            if (bigramRow && candidate.prediction.source !== 'glossary') {
+                const count: number | undefined = bigramRow.get(candidate.key);
+                if (count && count > 0) {
+                    boost += BIGRAM_BOOST_MAX * Math.min(1, count / BIGRAM_BOOST_SATURATION);
+                }
+            }
+            const score: number = context ? Math.min(base + boost, CONFIDENCE_CAP) : base;
             if (score > bestScore) {
                 best = candidate;
                 bestScore = score;
@@ -292,6 +308,8 @@ export class PredictionEngine {
                 });
             }
         }
+        // Keep the bigram map in sync with incrementally added targets
+        this.recordBigrams(words);
     }
 
     /**
@@ -380,6 +398,27 @@ export class PredictionEngine {
     }
 
     /**
+     * Records consecutive word pairs of a target text in the bigram map.
+     * Each pair is cleaned with the same rules as PrefixTrie.insert so that
+     * bigram keys always match collected candidate keys.
+     */
+    private recordBigrams(words: string[]): void {
+        for (let i: number = 0; i < words.length - 1; i++) {
+            const cleanPrev: string = words[i].replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase();
+            const cleanNext: string = words[i + 1].replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase();
+            if (cleanPrev.length < MIN_TRIGGER_CHARS || cleanNext.length < MIN_TRIGGER_CHARS) {
+                continue;
+            }
+            let row: Map<string, number> | undefined = this.bigrams.get(cleanPrev);
+            if (!row) {
+                row = new Map();
+                this.bigrams.set(cleanPrev, row);
+            }
+            row.set(cleanNext, (row.get(cleanNext) ?? 0) + 1);
+        }
+    }
+
+    /**
      * Counts one occurrence of a word in the frequency map. Uses the same
      * cleaning and minimum-length rules as PrefixTrie.insert so that counted
      * keys always match inserted words.
@@ -412,5 +451,6 @@ export class PredictionEngine {
         this.frequency.clear();
         this.contextSources = [];
         this.wordSources = new Map();
+        this.bigrams = new Map();
     }
 }

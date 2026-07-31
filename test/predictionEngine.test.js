@@ -355,4 +355,84 @@ describe('PredictionEngine', () => {
             assert.ok(Math.abs(result.confidence - 0.92) < 0.01);
         });
     });
+
+    describe('bigram context', () => {
+
+        // Equal-similarity TM matches: every word gets similarity/100 plus the
+        // BEST_MATCH_BONUS (all matches tie for best), so base confidence is
+        // 0.82 and any confidence difference below comes from bigram boost.
+        function tmMatch(id, target) {
+            return {
+                project: 'p', file: 'f', unit: 'u', segment: 's' + id, type: 'tm',
+                matchId: id, similarity: 80, fuzzy: 0,
+                srcLang: 'en', tgtLang: 'es', source: 'source', target: target, origin: 'tm'
+            };
+        }
+
+        it('a word seen 3+ times after the previous word gets the full +0.06 bigram boost', () => {
+            const engine = new PredictionEngine();
+            // 'gato' follows 'el' three times; 'guitarra' never follows 'el'
+            const tm = [
+                tmMatch('1', 'el gato'),
+                tmMatch('2', 'el gato'),
+                tmMatch('3', 'el gato'),
+                tmMatch('4', 'guitarra')
+            ];
+            engine.buildIndex([], tm, []);
+            const result = engine.predict('ga', { sourceText: '', previousWord: 'el' });
+            assert.equal(result.text, 'gato');
+            assert.equal(result.source, 'tm');
+            // 0.80 base + 0.02 best-match bonus + 0.06 full bigram boost
+            assert.equal(result.confidence, 80 / 100 + 0.02 + 0.06);
+            assert.ok(result.confidence > 0.80 + 0.02);
+        });
+
+        it('no previous word in context means no bigram boost', () => {
+            const engine = new PredictionEngine();
+            const tm = [
+                tmMatch('1', 'el gato'),
+                tmMatch('2', 'el gato'),
+                tmMatch('3', 'el gato')
+            ];
+            engine.buildIndex([], tm, []);
+            // With the previous word the boost applies...
+            const boosted = engine.predict('ga', { sourceText: '', previousWord: 'el' });
+            assert.equal(boosted.confidence, 80 / 100 + 0.02 + 0.06);
+            // ...but without it the confidence stays at base + best-match bonus,
+            // whether the context omits previousWord, sets it empty, or is absent.
+            const noPrevious = engine.predict('ga', { sourceText: '' });
+            assert.equal(noPrevious.text, 'gato');
+            assert.equal(noPrevious.confidence, 80 / 100 + 0.02);
+            const emptyPrevious = engine.predict('ga', { sourceText: '', previousWord: '' });
+            assert.equal(emptyPrevious.confidence, 80 / 100 + 0.02);
+            const noContext = engine.predict('ga');
+            assert.equal(noContext.confidence, 80 / 100 + 0.02);
+        });
+
+        it('bigram boost saturates at BIGRAM_BOOST_SATURATION (3)', () => {
+            const engine3 = new PredictionEngine();
+            const tm3 = [
+                tmMatch('1', 'el gato'),
+                tmMatch('2', 'el gato'),
+                tmMatch('3', 'el gato')
+            ];
+            engine3.buildIndex([], tm3, []);
+            const count3 = engine3.predict('ga', { sourceText: '', previousWord: 'el' });
+
+            const engine5 = new PredictionEngine();
+            const tm5 = [
+                tmMatch('1', 'el gato'),
+                tmMatch('2', 'el gato'),
+                tmMatch('3', 'el gato'),
+                tmMatch('4', 'el gato'),
+                tmMatch('5', 'el gato')
+            ];
+            engine5.buildIndex([], tm5, []);
+            const count5 = engine5.predict('ga', { sourceText: '', previousWord: 'el' });
+
+            // count 5 saturates: same boost as count 3
+            assert.equal(count5.confidence, count3.confidence);
+            assert.equal(count5.confidence, 80 / 100 + 0.02 + 0.06);
+        });
+    });
 });
