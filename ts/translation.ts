@@ -2381,7 +2381,15 @@ export class TranslationView {
 
         const prediction: Prediction | null = this.predictionEngine.predict(fragment);
         if (prediction) {
-            this.renderGhost(prediction.text);
+            // The engine returns the full word; the ghost must only show the
+            // completion suffix, otherwise the typed prefix would duplicate.
+            const suffix: string = prediction.text.substring(fragment.length);
+            if (suffix.length > 0) {
+                this.renderGhost(suffix);
+            } else {
+                // Fragment is already the complete word — hide the ghost
+                this.clearGhost();
+            }
         } else {
             this.clearGhost();
         }
