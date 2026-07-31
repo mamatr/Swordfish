@@ -239,6 +239,17 @@ Changes to `translation.ts` are:
 - Escape dismisses ghost without modifying content
 - Confirming a segment updates predictions for the next segment in the same file
 
+## Preferences
+
+The feature is gated behind a user preference:
+
+- **`enableTypingPrediction`** — boolean, default `true`
+- Toggle in the Preferences dialog (Translation section)
+- When disabled, no ghost text is rendered and prediction computation is skipped
+- Stored alongside all other preferences, loaded on app start
+
+When the preference changes, an IPC message updates a static flag on `TranslationView` so all open translation tabs pick up the change immediately.
+
 ## Out of Scope
 
 - Multi-word phrase prediction

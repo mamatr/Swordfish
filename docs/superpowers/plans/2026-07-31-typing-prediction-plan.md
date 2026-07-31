@@ -16,6 +16,7 @@
 - Glossary > TM > file segments > MT priority order
 - MT only included if already fetched (no automatic MT calls)
 - Single-word prediction only
+- Feature gated behind `enableTypingPrediction` preference (default `true`), checked via `TranslationView.enablePrediction` static flag
 
 ---
 
@@ -25,6 +26,8 @@
 |---|---|
 | `ts/predictionEngine.ts` (create) | PrefixTrie + PredictionEngine classes |
 | `ts/translation.ts` (modify) | Integration hooks: build index, handle keystrokes, render ghost |
+| `ts/preferences.ts` (modify) | Add `enableTypingPrediction` field to Preferences interface |
+| `ts/preferencesDialog.ts` (modify) | Add checkbox toggle in Preferences dialog |
 | `css/dark.css` (modify) | Ghost text style (dark theme) |
 | `css/light.css` (modify) | Ghost text style (light theme) |
 | `css/highcontrast.css` (modify) | Ghost text style (high contrast theme) |
@@ -321,7 +324,13 @@ Add after the existing import block (after line 23, `import { TmMatches } from "
 import { Prediction, PredictionEngine } from "./predictionEngine.js";
 ```
 
-- [ ] **Step 2: Add the class field**
+- [ ] **Step 2: Add static flag and class field**
+
+Add after the existing static fields (after line 74, after `static readonly MIN_SUBPANEL_HEIGHT: number = 40;`):
+
+```typescript
+    static enablePrediction: boolean = true;
+```
 
 Add after line 150 (`termsPanel: TermsPanel | undefined;`):
 
@@ -337,7 +346,19 @@ Add after line 176 (`this.sourceTags = new Map<string, string>();`):
         this.predictionEngine = new PredictionEngine();
 ```
 
-- [ ] **Step 4: Clear prediction engine in `selectRow()`**
+- [ ] **Step 4: Add IPC listener for preference changes**
+
+In the constructor, add after `this.predictionEngine = new PredictionEngine();` (after the line added in Step 3):
+
+```typescript
+        ipcRenderer.on('set-enable-prediction', (event: IpcRendererEvent, arg: boolean) => {
+            TranslationView.enablePrediction = arg;
+        });
+```
+
+This is already imported at the top of the file (`import { ipcRenderer, IpcRendererEvent } from "electron";`), so no new import is needed.
+
+- [ ] **Step 5: Clear prediction engine in `selectRow()`**
 
 In the `selectRow()` method (line 2370), add after `this.currentContent = this.currentCell.innerHTML;` (after line 2396):
 
@@ -346,7 +367,7 @@ In the `selectRow()` method (line 2370), add after `this.currentContent = this.c
         this.clearGhost();
 ```
 
-- [ ] **Step 5: Add `this.updatePredictionIndex()` call in `setMatches()`**
+- [ ] **Step 6: Add `this.updatePredictionIndex()` call in `setMatches()`**
 
 In the `setMatches()` method (line 2623), add after the `}` that closes the `for` loop splitting matches (after line 2644, before the `if (max > 0...)` line):
 
@@ -354,7 +375,7 @@ In the `setMatches()` method (line 2623), add after the `}` that closes the `for
         this.updatePredictionIndex();
 ```
 
-- [ ] **Step 6: Add `this.updatePredictionIndex()` call in `setTerms()`**
+- [ ] **Step 7: Add `this.updatePredictionIndex()` call in `setTerms()`**
 
 In the `setTerms()` method (line 2650), add after `this.termsPanel?.setTerms(terms);`:
 
@@ -362,7 +383,7 @@ In the `setTerms()` method (line 2650), add after `this.termsPanel?.setTerms(ter
         this.updatePredictionIndex();
 ```
 
-- [ ] **Step 7: Add the `updatePredictionIndex()` private method**
+- [ ] **Step 8: Add the `updatePredictionIndex()` private method**
 
 Add a new private method after `setTerms()` (after line 2652). Insert before `setTarget()`:
 
@@ -408,7 +429,7 @@ Add a new private method after `setTerms()` (after line 2652). Insert before `se
     }
 ```
 
-- [ ] **Step 8: Wire up the prediction input handler in `selectRow()`**
+- [ ] **Step 9: Wire up the prediction input handler in `selectRow()`**
 
 In `selectRow()`, replace the line:
 ```typescript
@@ -422,12 +443,15 @@ In `selectRow()`, replace the line:
         });
 ```
 
-- [ ] **Step 9: Add ghost text handler methods**
+- [ ] **Step 10: Add ghost text handler methods**
 
 Add the following new private methods. Insert before `changeListener()` (before line 2352):
 
 ```typescript
     handlePredictionInput(event: KeyboardEvent): void {
+        if (!TranslationView.enablePrediction) {
+            return;
+        }
         // Don't predict on navigation keys
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' ||
             event.key === 'ArrowUp' || event.key === 'ArrowDown' ||
@@ -533,9 +557,9 @@ Add the following new private methods. Insert before `changeListener()` (before 
     }
 ```
 
-- [ ] **Step 10: Add Tab handler to accept ghost text**
+- [ ] **Step 11: Add Tab handler to accept ghost text**
 
-In `selectRow()`, add a `keydown` event listener on the target cell alongside the `keyup` listener (after the `keyup` listener added in Step 8). This needs to be added at the end of `selectRow()`, before the closing `}` of the method (after the `this.currentCell.focus();` call at line 2424):
+In `selectRow()`, add a `keydown` event listener on the target cell alongside the `keyup` listener (after the `keyup` listener added in Step 9). This needs to be added at the end of `selectRow()`, before the closing `}` of the method (after the `this.currentCell.focus();` call at line 2424):
 
 ```typescript
         this.currentCell.addEventListener('keydown', (event: KeyboardEvent) => {
@@ -565,7 +589,7 @@ In `selectRow()`, add a `keydown` event listener on the target cell alongside th
         });
 ```
 
-- [ ] **Step 11: Compile and verify no type errors**
+- [ ] **Step 12: Compile and verify no type errors**
 
 ```bash
 cd /Users/mamat/Labs/Swordfish && npx tsc --noEmit 2>&1
@@ -573,7 +597,7 @@ cd /Users/mamat/Labs/Swordfish && npx tsc --noEmit 2>&1
 
 Expected: no errors.
 
-- [ ] **Step 12: Run the app and smoke test**
+- [ ] **Step 13: Run the app and smoke test**
 
 ```bash
 cd /Users/mamat/Labs/Swordfish && npm start
@@ -588,7 +612,7 @@ Manual smoke test:
 6. Press Escape while ghost is visible — verify ghost disappears
 7. Move to a different segment — verify ghost cleared, predictions update for new segment
 
-- [ ] **Step 13: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
 git add ts/translation.ts
@@ -599,7 +623,89 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Add segment-confirmation update to prediction index
+### Task 4: Add enableTypingPrediction preference
+
+**Files:**
+- Modify: `ts/preferences.ts`
+- Modify: `ts/preferencesDialog.ts`
+
+**Interfaces:**
+- Produces: `enableTypingPrediction` boolean preference — consumed by Task 3's static flag
+
+- [ ] **Step 1: Add field to Preferences interface**
+
+In `ts/preferences.ts`, add after line 102 (`pageRows: number;`):
+
+```typescript
+    enableTypingPrediction: boolean;
+```
+
+- [ ] **Step 2: Add checkbox in Preferences dialog**
+
+In `ts/preferencesDialog.ts`, add the checkbox after the existing checkboxes in the Translation section. Find the `caseSensitiveMatches` checkbox block (around line 1130) and add after its `row` div. Locate the row div that follows `caseSensitiveMatches` and insert a new row before it:
+
+```typescript
+        let predRow: HTMLDivElement = document.createElement('div');
+        predRow.classList.add('row');
+        predRow.classList.add('middle');
+        rowsHolder.appendChild(predRow);
+
+        this.enablePredictionCheck = document.createElement('input');
+        this.enablePredictionCheck.type = 'checkbox';
+        this.enablePredictionCheck.id = 'enablePrediction';
+        predRow.appendChild(this.enablePredictionCheck);
+
+        let predLabel: HTMLLabelElement = document.createElement('label');
+        predLabel.innerText = 'Enable Typing Prediction';
+        predLabel.setAttribute('for', 'enablePrediction');
+        predLabel.style.marginTop = '4px';
+        predRow.appendChild(predLabel);
+```
+
+- [ ] **Step 3: Add field declaration**
+
+In `preferencesDialog.ts`, add after line 43 (`autoConfirm: HTMLInputElement = document.createElement('input');`):
+
+```typescript
+    enablePredictionCheck: HTMLInputElement = document.createElement('input');
+```
+
+- [ ] **Step 4: Load preference value**
+
+In `preferencesDialog.ts`, find the block where checkboxes are loaded from preferences (around line 249-254). Add after `this.autoConfirm.checked = preferences.autoConfirm;`:
+
+```typescript
+        this.enablePredictionCheck.checked = preferences.enableTypingPrediction;
+```
+
+- [ ] **Step 5: Save preference value**
+
+In `preferencesDialog.ts`, find the block where preferences are saved (around line 509-514). Add after `autoConfirm: this.autoConfirm.checked,`:
+
+```typescript
+            enableTypingPrediction: this.enablePredictionCheck.checked,
+```
+
+- [ ] **Step 6: Compile and verify**
+
+```bash
+cd /Users/mamat/Labs/Swordfish && npx tsc --noEmit 2>&1
+```
+
+Expected: no errors.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add ts/preferences.ts ts/preferencesDialog.ts
+git commit -m "feat: add enableTypingPrediction preference toggle
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+---
+
+### Task 5: Add segment-confirmation update to prediction index
 
 **Files:**
 - Modify: `ts/translation.ts`
