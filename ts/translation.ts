@@ -2368,6 +2368,15 @@ export class TranslationView {
         if (!TranslationView.enablePrediction) {
             return;
         }
+        // Clear ghost on word boundaries: typing whitespace ends the current
+        // word, so a pending ghost would be stale. This must run before the
+        // fragment-length checks — extractWordAtCursor() returns '' for a
+        // trailing space, which the empty-fragment guard below would
+        // otherwise mistake for an unrelated keyup (modifier release, ...).
+        if (event.key === ' ' || event.key === 'Enter') {
+            this.clearGhost();
+            return;
+        }
         // Don't predict on navigation keys
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' ||
             event.key === 'ArrowUp' || event.key === 'ArrowDown' ||
