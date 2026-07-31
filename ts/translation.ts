@@ -157,6 +157,9 @@ export class TranslationView {
     termsPanel: TermsPanel | undefined;
     predictionEngine: PredictionEngine;
     private predictionListenersCell: HTMLTableCellElement | undefined;
+    private predictionMode: boolean = false;
+    private lastCompletedWord: string = '';
+    private predictionSeeded: boolean = false;
 
     memSelect: HTMLSelectElement;
     glossSelect: HTMLSelectElement;
@@ -2372,21 +2375,37 @@ export class TranslationView {
         if (!TranslationView.enablePrediction) {
             return;
         }
-        // Clear ghost on word boundaries: typing whitespace ends the current
-        // word, so a pending ghost would be stale. This must run before the
-        // fragment-length checks — extractWordContext() returns '' for a
-        // trailing space, which the empty-fragment guard below would
-        // otherwise mistake for an unrelated keyup (modifier release, ...).
-        if (event.key === ' ' || event.key === 'Enter') {
+        // Space: clear any pending ghost (word boundary), then enter
+        // prediction mode to suggest the most frequent next word.
+        if (event.key === ' ') {
             this.clearGhost();
+            this.lastCompletedWord = this.extractLastWord();
+            this.predictionMode = false;
+            if (this.lastCompletedWord.length >= MIN_TRIGGER_CHARS) {
+                const prediction: Prediction | null = this.predictionEngine.predictNextWord(this.lastCompletedWord);
+                if (prediction) {
+                    this.renderGhost(prediction.text);
+                    this.predictionMode = true;
+                }
+            }
             return;
         }
-        // Don't predict on navigation keys
+        // Enter: accept ghost (word boundary), then clear prediction mode
+        if (event.key === 'Enter') {
+            const ghost: HTMLSpanElement | null = this.currentCell?.querySelector('.ghost-prediction') as HTMLSpanElement | null;
+            if (ghost) {
+                this.acceptGhost(ghost);
+            }
+            this.predictionMode = false;
+            return;
+        }
+        // Don't predict on navigation keys — dismiss ghost and reset mode
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' ||
             event.key === 'ArrowUp' || event.key === 'ArrowDown' ||
             event.key === 'Home' || event.key === 'End' ||
             event.key === 'Tab' || event.key === 'Escape') {
             this.clearGhost();
+            this.predictionMode = false;
             return;
         }
 
@@ -2398,6 +2417,45 @@ export class TranslationView {
         if (fragment.length === 0 && this.currentCell?.querySelector('.ghost-prediction')) {
             return;
         }
+
+        // Prediction mode: refine the bigram-based next-word suggestion by
+        // the prefix the user has typed so far.
+        if (this.predictionMode) {
+            if (fragment.length === 0) {
+                // User deleted back to the start of the word — re-show the
+                // full next-word prediction without a prefix filter.
+                const prediction: Prediction | null = this.predictionEngine.predictNextWord(this.lastCompletedWord);
+                if (prediction) {
+                    this.renderGhost(prediction.text);
+                } else {
+                    this.clearGhost();
+                    this.predictionMode = false;
+                }
+                return;
+            }
+            const prediction: Prediction | null = this.predictionEngine.predictNextWord(this.lastCompletedWord, fragment);
+            if (prediction) {
+                const suffix: string = prediction.text.substring(fragment.length);
+                if (suffix.length > 0) {
+                    this.renderGhost(suffix);
+                } else {
+                    this.clearGhost();
+                }
+            } else {
+                // Bigram prediction produced nothing for this prefix — fall
+                // back to normal trie-based completion.
+                this.predictionMode = false;
+                this.clearGhost();
+                if (fragment.length >= MIN_TRIGGER_CHARS) {
+                    // Retry as completion (re-entrant call is safe because
+                    // predictionMode is now false).
+                    this.handlePredictionInput(event);
+                }
+            }
+            return;
+        }
+
+        // Normal completion mode: prefix-match against the trie index
         if (fragment.length < MIN_TRIGGER_CHARS) {
             this.clearGhost();
             return;
@@ -2478,6 +2536,59 @@ export class TranslationView {
         return { fragment, previousWord };
     }
 
+    /**
+     * Returns the last complete word before the cursor — the word that was
+     * just finished (e.g. after pressing Space). Walks backward past
+     * whitespace to find the preceding word, then strips surrounding
+     * punctuation so the result matches the cleaned keys of the engine's
+     * bigram map.
+     */
+    extractLastWord(): string {
+        const selection: Selection | null = window.getSelection();
+        if (!selection || !selection.rangeCount) {
+            return '';
+        }
+
+        const range: Range = selection.getRangeAt(0);
+        if (!this.currentCell || !this.currentCell.contains(range.startContainer)) {
+            return '';
+        }
+
+        // Collect text from cursor back to the start of the cell
+        let text: string = '';
+        let node: Node | null = range.startContainer;
+        let offset: number = range.startOffset;
+
+        if (node.nodeType === Node.TEXT_NODE && node.textContent) {
+            text = node.textContent.substring(0, offset);
+        }
+
+        while (node && node !== this.currentCell) {
+            if (node.previousSibling) {
+                node = node.previousSibling;
+                if (node.nodeType === Node.TEXT_NODE && node.textContent) {
+                    text = node.textContent + text;
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    break;
+                }
+            } else {
+                node = node.parentNode;
+                if (node === this.currentCell) {
+                    break;
+                }
+            }
+        }
+
+        // Skip trailing whitespace (the space(s) just typed), then grab
+        // the last non-whitespace chunk before that.
+        const trimmed: string = text.replace(/\s+$/, '');
+        const wordMatch: RegExpMatchArray | null = trimmed.match(/(\S+)$/);
+        if (!wordMatch) {
+            return '';
+        }
+        return wordMatch[1].replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    }
+
     renderGhost(completion: string): void {
         this.clearGhost();
 
@@ -2514,6 +2625,24 @@ export class TranslationView {
         }
         const ghosts: NodeListOf<HTMLSpanElement> = this.currentCell.querySelectorAll('.ghost-prediction');
         ghosts.forEach((g: HTMLSpanElement) => g.remove());
+    }
+
+    /**
+     * Accepts a ghost prediction: removes the ghost span and inserts its
+     * text content as a plain text node at the current cursor position.
+     * Used by Space (which accepts and then predicts the next word), and by
+     * Tab/Enter (which accept and stop).
+     */
+    acceptGhost(ghost: HTMLSpanElement): void {
+        ghost.remove();
+        const sel: Selection | null = window.getSelection();
+        if (sel && sel.rangeCount) {
+            const r: Range = sel.getRangeAt(0);
+            r.insertNode(document.createTextNode(ghost.textContent || ''));
+            r.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(r);
+        }
     }
 
     changeListener(): void {
@@ -2570,8 +2699,10 @@ export class TranslationView {
         // Apply highlightSpaces to ensure consistent comparison when leaving the segment
         this.currentCell.innerHTML = this.highlightSpaces(this.currentCell.innerHTML);
         this.currentContent = this.currentCell.innerHTML;
-        this.predictionEngine.clear();
+        // === CUMULATIVE LEARNING: keep the engine index across segments ===
         this.clearGhost();
+        this.predictionMode = false;
+        this.lastCompletedWord = '';
         if (!currentTranslate.innerHTML.includes(TranslationView.LOCK_FRAGMENT)) {
             this.currentCell.contentEditable = 'true';
             this.currentCell.classList.add('editing');
@@ -2606,16 +2737,7 @@ export class TranslationView {
                     const ghost: HTMLSpanElement | null = this.currentCell?.querySelector('.ghost-prediction') as HTMLSpanElement | null;
                     if (ghost) {
                         event.preventDefault();
-                        ghost.remove();
-                        // Insert the completion text at cursor
-                        const sel: Selection | null = window.getSelection();
-                        if (sel && sel.rangeCount) {
-                            const r: Range = sel.getRangeAt(0);
-                            r.insertNode(document.createTextNode(ghost.textContent || ''));
-                            r.collapse(false);
-                            sel.removeAllRanges();
-                            sel.addRange(r);
-                        }
+                        this.acceptGhost(ghost);
                     }
                 }
                 if (event.key === 'Escape') {
@@ -2624,6 +2746,7 @@ export class TranslationView {
                         event.preventDefault();
                         ghost.remove();
                     }
+                    this.predictionMode = false;
                 }
             });
             this.predictionListenersCell = this.currentCell;
@@ -2904,7 +3027,24 @@ export class TranslationView {
             mtMatch = this.mtMatches.matches.values().next().value;
         }
 
-        this.predictionEngine.buildIndex(fileSegments, tmMatchList, glossaryTerms, mtMatch);
+        // === CUMULATIVE LEARNING (begin) ===
+        // Seed the engine once with file segments and glossary (persistent
+        // across segments).  Subsequent calls only add per-segment TM and MT
+        // data so the engine accumulates knowledge across the whole project.
+        if (!this.predictionSeeded) {
+            this.predictionEngine.buildIndex(fileSegments, tmMatchList, glossaryTerms, mtMatch);
+            this.predictionSeeded = true;
+        } else {
+            for (const match of tmMatchList) {
+                if (match.similarity >= 70) {
+                    this.predictionEngine.addMatchData(match);
+                }
+            }
+            if (mtMatch) {
+                this.predictionEngine.addMatchData(mtMatch);
+            }
+        }
+        // === CUMULATIVE LEARNING (end) ===
     }
 
     setTarget(arg: any): void {

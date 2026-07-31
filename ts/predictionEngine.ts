@@ -291,6 +291,45 @@ export class PredictionEngine {
         return best ? { text: best.prediction.text, source: best.prediction.source, confidence: bestScore } : null;
     }
 
+    /**
+     * Predicts the most frequent word that follows `previousWord` in the
+     * indexed targets (bigram-based next-word prediction). When `prefix` is
+     * provided, only candidates starting with that prefix are considered.
+     * Returns null when no bigram data exists for the previous word, or no
+     * candidate matches the prefix filter.
+     *
+     * Confidence formula: 0.70 + 0.15 * frequency, capped at 0.85.
+     * This is intentionally below glossary (0.95) and strong TM matches so
+     * that prefix-matched completions still win when they disagree.
+     */
+    predictNextWord(previousWord: string, prefix?: string): Prediction | null {
+        const cleanPrev: string = previousWord.toLowerCase().trim();
+        if (cleanPrev.length < MIN_TRIGGER_CHARS) {
+            return null;
+        }
+        const bigramRow: Map<string, number> | undefined = this.bigrams.get(cleanPrev);
+        if (!bigramRow || bigramRow.size === 0) {
+            return null;
+        }
+        let bestWord: string = '';
+        let bestCount: number = 0;
+        for (const [word, count] of bigramRow) {
+            if (prefix && !word.toLowerCase().startsWith(prefix.toLowerCase())) {
+                continue;
+            }
+            if (count > bestCount) {
+                bestCount = count;
+                bestWord = word;
+            }
+        }
+        if (!bestWord) {
+            return null;
+        }
+        const frequency: number = Math.min(1, bestCount / BIGRAM_BOOST_SATURATION);
+        const confidence: number = Math.min(0.70 + 0.15 * frequency, 0.85);
+        return { text: bestWord, source: 'file', confidence };
+    }
+
     addEntry(targetText: string, source: Prediction['source'], confidence: number): void {
         const cleanText: string = targetText.replace(/<[^>]*>/g, '');
         const words: string[] = cleanText.split(/\s+/);
@@ -314,6 +353,32 @@ export class PredictionEngine {
             }
         }
         // Keep the bigram map in sync with incrementally added targets
+        this.recordBigrams(words);
+    }
+
+    /**
+     * Adds TM or MT match data to the existing index without clearing.
+     * Used for incremental per-segment updates so the engine accumulates
+     * knowledge across the whole project (OmegaT-style cumulative learning).
+     *
+     * Unlike the TM path in buildIndex(), this does NOT apply the best-match
+     * bonus — that bonus requires knowing the maximum similarity across ALL
+     * TM matches for the current segment, which isn't available in
+     * incremental mode.  The cumulative benefit of retaining data across
+     * segments outweighs the per-segment bonus.
+     */
+    addMatchData(match: Match): void {
+        const targetText: string = match.target.replace(/<[^>]*>/g, '');
+        const words: string[] = targetText.split(/\s+/);
+        const source: Prediction['source'] = match.type === 'mt' ? 'mt' : 'tm';
+        const confidence: number = source === 'mt' ? 0.60 : match.similarity / 100;
+        const sourceIndex: number = this.registerSource(match.source);
+        for (const word of words) {
+            this.trie.insert(word, { text: word, source, confidence });
+            if (sourceIndex >= 0 && source === 'tm') {
+                this.recordWordSource(word, sourceIndex);
+            }
+        }
         this.recordBigrams(words);
     }
 

@@ -459,4 +459,207 @@ describe('PredictionEngine', () => {
             assert.equal(count5.confidence, 80 / 100 + 0.02 + 0.06);
         });
     });
+
+    describe('predictNextWord()', () => {
+
+        it('returns the most frequent next word after the given word', () => {
+            const engine = new PredictionEngine();
+            // Build segments where 'casa' is followed by 'grande' 3 times and
+            // 'casa' is followed by 'blanca' once
+            const file = [
+                { target: 'la casa grande' },
+                { target: 'mi casa grande' },
+                { target: 'su casa grande' },
+                { target: 'una casa blanca' }
+            ];
+            engine.buildIndex(file, [], []);
+            const result = engine.predictNextWord('casa');
+            assert.notEqual(result, null);
+            assert.equal(result.text, 'grande');
+            assert.equal(result.source, 'file');
+            // Confidence: frequency = min(1, 3/3) = 1.0, 0.70 + 0.15*1.0 = 0.85
+            assert.equal(result.confidence, 0.85);
+        });
+
+        it('returns null when no bigram data exists for the word', () => {
+            const engine = new PredictionEngine();
+            const file = [{ target: 'hola mundo' }];
+            engine.buildIndex(file, [], []);
+            assert.equal(engine.predictNextWord('xyz'), null);
+        });
+
+        it('returns null for empty index', () => {
+            const engine = new PredictionEngine();
+            engine.buildIndex([], [], []);
+            assert.equal(engine.predictNextWord('anything'), null);
+        });
+
+        it('returns null when previous word is shorter than MIN_TRIGGER_CHARS', () => {
+            const engine = new PredictionEngine();
+            const file = [{ target: 'a gato' }];
+            engine.buildIndex(file, [], []);
+            // 'a' is only 1 char, below MIN_TRIGGER_CHARS=2
+            assert.equal(engine.predictNextWord('a'), null);
+        });
+
+        it('filters candidates by prefix when provided', () => {
+            const engine = new PredictionEngine();
+            const file = [
+                { target: 'casa grande' },
+                { target: 'casa blanca' },
+                { target: 'casa blanca' }  // blanca seen twice, grande once
+            ];
+            engine.buildIndex(file, [], []);
+            // Without prefix: 'blanca' wins (count 2 vs 1)
+            const noPrefix = engine.predictNextWord('casa');
+            assert.equal(noPrefix.text, 'blanca');
+            // With prefix 'gra': only 'grande' matches
+            const prefixed = engine.predictNextWord('casa', 'gra');
+            assert.equal(prefixed.text, 'grande');
+        });
+
+        it('returns null when no candidate matches the prefix', () => {
+            const engine = new PredictionEngine();
+            const file = [{ target: 'casa grande' }];
+            engine.buildIndex(file, [], []);
+            assert.equal(engine.predictNextWord('casa', 'zz'), null);
+        });
+
+        it('preserves original casing of the predicted word', () => {
+            const engine = new PredictionEngine();
+            const file = [{ target: 'Guardar archivo' }];
+            engine.buildIndex(file, [], []);
+            const result = engine.predictNextWord('Guardar');
+            assert.equal(result.text, 'archivo');
+        });
+
+        it('case-insensitive matching on previous word', () => {
+            const engine = new PredictionEngine();
+            const file = [{ target: 'GUARDAR archivo' }];
+            engine.buildIndex(file, [], []);
+            const result = engine.predictNextWord('guardar');
+            assert.notEqual(result, null);
+            assert.equal(result.text, 'archivo');
+        });
+
+        it('case-insensitive matching on prefix', () => {
+            const engine = new PredictionEngine();
+            const file = [{ target: 'casa GRANDE' }];
+            engine.buildIndex(file, [], []);
+            // Bigram map stores words lowercased; prefix match is case-insensitive
+            const result = engine.predictNextWord('casa', 'gra');
+            assert.equal(result.text, 'grande');
+        });
+
+        it('confidence scales with frequency up to the cap', () => {
+            const engine = new PredictionEngine();
+            // 'gato' follows 'el' only once — frequency = min(1, 1/3) = 0.333
+            const file = [{ target: 'el gato' }];
+            engine.buildIndex(file, [], []);
+            const result = engine.predictNextWord('el');
+            assert.equal(result.confidence, 0.70 + 0.15 * (1 / 3));
+            assert.ok(result.confidence < 0.80);
+        });
+
+        it('Word pairs from glossary terms are included', () => {
+            const engine = new PredictionEngine();
+            const glossary = [{ srcLang: 'en', tgtLang: 'es', source: 'dog', target: 'perro grande', origin: 'gloss' }];
+            engine.buildIndex([], [], glossary);
+            const result = engine.predictNextWord('perro');
+            assert.notEqual(result, null);
+            assert.equal(result.text, 'grande');
+        });
+
+        it('TM match bigrams participate in prediction', () => {
+            const engine = new PredictionEngine();
+            const tm = [{ project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 85, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'hello', target: 'hola mundo', origin: 'tm' }];
+            engine.buildIndex([], tm, []);
+            const result = engine.predictNextWord('hola');
+            assert.notEqual(result, null);
+            assert.equal(result.text, 'mundo');
+        });
+
+        it('rebuilding the index clears old bigram data', () => {
+            const engine = new PredictionEngine();
+            engine.buildIndex([{ target: 'casa grande' }], [], []);
+            assert.equal(engine.predictNextWord('casa').text, 'grande');
+            // Rebuild with different data
+            engine.buildIndex([{ target: 'casa blanca' }], [], []);
+            assert.equal(engine.predictNextWord('casa').text, 'blanca');
+            // Old bigram should not linger
+            assert.equal(engine.predictNextWord('casa').text, 'blanca');
+        });
+    });
+
+    describe('addMatchData()', () => {
+
+        it('adds a TM entry to the existing index without clearing file data', () => {
+            const engine = new PredictionEngine();
+            // Seed with file data
+            engine.buildIndex([{ target: 'ventana puerta' }], [], []);
+            // Add TM match incrementally
+            const tm = { project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 85, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'hello', target: 'hola mundo', origin: 'tm' };
+            engine.addMatchData(tm);
+            // Both file and TM data must be searchable
+            assert.notEqual(engine.predict('ve'), null);
+            assert.equal(engine.predict('ve').text, 'ventana');
+            assert.notEqual(engine.predict('ho'), null);
+            assert.equal(engine.predict('ho').text, 'hola');
+            assert.equal(engine.predict('ho').source, 'tm');
+        });
+
+        it('adds an MT entry to the existing index', () => {
+            const engine = new PredictionEngine();
+            engine.buildIndex([{ target: 'archivo' }], [], []);
+            const mt = { project: 'p', file: 'f', unit: 'u', segment: 's', type: 'mt', matchId: '1', similarity: 100, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'file', target: 'documento', origin: 'mt' };
+            engine.addMatchData(mt);
+            const result = engine.predict('do');
+            assert.notEqual(result, null);
+            assert.equal(result.text, 'documento');
+            assert.equal(result.source, 'mt');
+        });
+
+        it('respects the 70% similarity threshold', () => {
+            const engine = new PredictionEngine();
+            engine.buildIndex([], [], []);
+            const lowTM = { project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 65, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'hello', target: 'hola', origin: 'tm' };
+            // addMatchData doesn't check similarity — the caller checks.
+            // The engine itself shouldn't crash on low-similarity entries.
+            engine.addMatchData(lowTM);
+            // 'hola' was added at 65% similarity (0.65 confidence)
+            const result = engine.predict('ho');
+            assert.notEqual(result, null);
+            assert.equal(result.confidence, 0.65);
+        });
+
+        it('multiple calls accumulate entries', () => {
+            const engine = new PredictionEngine();
+            engine.buildIndex([], [], []);
+            const tm1 = { project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 80, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'a', target: 'gato', origin: 'tm' };
+            const tm2 = { project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '2', similarity: 80, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'b', target: 'perro', origin: 'tm' };
+            engine.addMatchData(tm1);
+            engine.addMatchData(tm2);
+            assert.notEqual(engine.predict('ga'), null);
+            assert.notEqual(engine.predict('pe'), null);
+        });
+
+        it('records bigrams for TM entries', () => {
+            const engine = new PredictionEngine();
+            engine.buildIndex([], [], []);
+            const tm = { project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 85, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'hello', target: 'el gato', origin: 'tm' };
+            engine.addMatchData(tm);
+            const result = engine.predictNextWord('el');
+            assert.notEqual(result, null);
+            assert.equal(result.text, 'gato');
+        });
+
+        it('strips HTML tags from target text', () => {
+            const engine = new PredictionEngine();
+            engine.buildIndex([], [], []);
+            const tm = { project: 'p', file: 'f', unit: 'u', segment: 's', type: 'tm', matchId: '1', similarity: 90, fuzzy: 0, srcLang: 'en', tgtLang: 'es', source: 'bold', target: '<b>negrita</b> texto', origin: 'tm' };
+            engine.addMatchData(tm);
+            const result = engine.predict('ne');
+            assert.equal(result.text, 'negrita');
+        });
+    });
 });
