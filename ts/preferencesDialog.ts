@@ -41,6 +41,7 @@ export class PreferencesDialog {
     caseSensitiveTermSearches: HTMLInputElement = document.createElement('input');
     caseSensitiveMatches: HTMLInputElement = document.createElement('input');
     autoConfirm: HTMLInputElement = document.createElement('input');
+    enablePredictionCheck: HTMLInputElement = document.createElement('input');
 
     enableGoogle: HTMLInputElement = document.createElement('input');
     googleKey: HTMLInputElement = document.createElement('input');
@@ -252,6 +253,7 @@ export class PreferencesDialog {
         this.caseSensitiveTermSearches.checked = preferences.caseSensitiveSearches;
         this.caseSensitiveMatches.checked = preferences.caseSensitiveMatches;
         this.autoConfirm.checked = preferences.autoConfirm;
+        this.enablePredictionCheck.checked = preferences.enableTypingPrediction;
         this.matchThreshold.value = preferences.matchThreshold.toString();
 
         this.enableGoogle.checked = preferences.google.enabled;
@@ -512,6 +514,7 @@ export class PreferencesDialog {
             caseSensitiveSearches: this.caseSensitiveTermSearches.checked,
             caseSensitiveMatches: this.caseSensitiveMatches.checked,
             autoConfirm: this.autoConfirm.checked,
+            enableTypingPrediction: this.enablePredictionCheck.checked,
             matchThreshold: this.matchThreshold.valueAsNumber,
             google: {
                 enabled: this.enableGoogle.checked,
@@ -1149,6 +1152,22 @@ export class PreferencesDialog {
         caseSensitiveMatchesLabel.setAttribute('for', 'caseSensitiveMatches');
         caseSensitiveMatchesLabel.style.marginTop = '4px';
         row5.appendChild(caseSensitiveMatchesLabel);
+
+        let predRow: HTMLDivElement = document.createElement('div');
+        predRow.classList.add('row');
+        predRow.classList.add('middle');
+        rowsHolder.appendChild(predRow);
+
+        this.enablePredictionCheck = document.createElement('input');
+        this.enablePredictionCheck.type = 'checkbox';
+        this.enablePredictionCheck.id = 'enablePrediction';
+        predRow.appendChild(this.enablePredictionCheck);
+
+        let predLabel: HTMLLabelElement = document.createElement('label');
+        predLabel.innerText = 'Enable Typing Prediction';
+        predLabel.setAttribute('for', 'enablePrediction');
+        predLabel.style.marginTop = '4px';
+        predRow.appendChild(predLabel);
 
         let row6: HTMLDivElement = document.createElement('div');
         row6.classList.add('row');

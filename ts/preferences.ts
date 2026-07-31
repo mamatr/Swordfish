@@ -100,4 +100,5 @@ export interface Preferences {
     os: string;
     showGuide: boolean;
     pageRows: number;
+    enableTypingPrediction: boolean;
 }

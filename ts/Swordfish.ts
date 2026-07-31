@@ -106,6 +106,7 @@ export class Swordfish {
         caseSensitiveSearches: false,
         caseSensitiveMatches: true,
         autoConfirm: false,
+        enableTypingPrediction: false,
         matchThreshold: 60,
         google: {
             enabled: false,
