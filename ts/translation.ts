@@ -2883,6 +2883,9 @@ export class TranslationView {
                     return;
                 }
                 targetCell.innerHTML = arg.target;
+                if (arg.target && arg.target.trim() !== '') {
+                    this.predictionEngine.addEntry(arg.target, 'file', 0.80);
+                }
                 if (row === this.currentRow) {
                     this.currentCell = targetCell;
                 }
