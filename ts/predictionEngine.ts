@@ -60,6 +60,11 @@ class PrefixTrie {
     insert(word: string, prediction: Prediction): void {
         // Strip leading/trailing punctuation from the word
         const cleanWord: string = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+        // Skip words shorter than MIN_WORD_LENGTH for tm, file, and mt sources.
+        // Glossary terms are always accepted, e.g. 2-char acronyms like "pH".
+        if (prediction.source !== 'glossary' && cleanWord.length < MIN_WORD_LENGTH) {
+            return;
+        }
         if (cleanWord.length < MIN_TRIGGER_CHARS) {
             return;
         }

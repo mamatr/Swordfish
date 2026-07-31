@@ -200,6 +200,30 @@ describe('PredictionEngine', () => {
         });
     });
 
+    describe('min word length and trigger', () => {
+
+        it('2-char words are filtered from file source but glossary terms are kept', () => {
+            const engine = new PredictionEngine();
+            const file = [{ target: 'de' }];
+            const glossary = [{ srcLang: 'en', tgtLang: 'es', source: 'acid', target: 'pH', origin: 'gloss' }];
+            engine.buildIndex(file, [], glossary);
+            // "de" (2 chars) is below MIN_WORD_LENGTH=3 and not glossary
+            assert.equal(engine.predict('de'), null);
+            // "pH" (2 chars) glossary term is always accepted
+            const result = engine.predict('ph');
+            assert.notEqual(result, null);
+            assert.equal(result.text, 'pH');
+            assert.equal(result.source, 'glossary');
+        });
+
+        it('a 1-char prefix returns null (MIN_TRIGGER_CHARS=2)', () => {
+            const engine = new PredictionEngine();
+            const glossary = [{ srcLang: 'en', tgtLang: 'es', source: 'cat', target: 'gato', origin: 'gloss' }];
+            engine.buildIndex([], [], glossary);
+            assert.equal(engine.predict('g'), null);
+        });
+    });
+
     describe('idempotent rebuilds', () => {
 
         it('rebuilding the index clears old data', () => {

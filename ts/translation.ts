@@ -24,6 +24,10 @@ import { TmMatches } from "./tmMatches.js";
 import { Term } from "./term.js";
 import { Prediction, PredictionContext, PredictionEngine } from "./predictionEngine.js";
 
+// Mirror of the prediction engine's trigger threshold; kept here so the
+// view layer does not import engine-internal constants.
+const MIN_TRIGGER_CHARS: number = 2;
+
 export class TranslationView {
 
     static SVG_BLANK: string = "<svg xmlns='http://www.w3.org/2000/svg' height='24' viewBox='0 0 24 24' width='24'></svg>";
@@ -2394,7 +2398,7 @@ export class TranslationView {
         if (fragment.length === 0 && this.currentCell?.querySelector('.ghost-prediction')) {
             return;
         }
-        if (fragment.length < 2) {
+        if (fragment.length < MIN_TRIGGER_CHARS) {
             this.clearGhost();
             return;
         }
