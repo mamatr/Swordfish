@@ -2127,6 +2127,9 @@ export class TranslationView {
     }
 
     saveEdit(arg: any): void {
+        // Remove any pending ghost span before persisting the cell content,
+        // otherwise the ghost text and its markup get stored as translation.
+        this.clearGhost();
         let confirm: boolean = arg.confirm;
         let next: string = arg.next;
         let currentTranslate: HTMLTableCellElement = this.currentRow?.getElementsByClassName('translate')[0] as HTMLTableCellElement;
