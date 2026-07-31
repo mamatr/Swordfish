@@ -2377,6 +2377,13 @@ export class TranslationView {
         }
 
         const fragment: string = this.extractWordAtCursor();
+        // After renderGhost the caret rests before the ghost span, where
+        // extractWordAtCursor returns ''. The ghost is the pending text, so
+        // ignore unrelated keyups (modifier releases, Insert, F-keys, ...)
+        // instead of dismissing the ghost.
+        if (fragment.length === 0 && this.currentCell?.querySelector('.ghost-prediction')) {
+            return;
+        }
         if (fragment.length < 2) {
             this.clearGhost();
             return;
